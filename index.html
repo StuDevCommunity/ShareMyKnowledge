@@ -1,0 +1,785 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ToanRoiRac Markdown Reader</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Merriweather:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="page">
+    <section class="screen explorer-screen panel" id="explorerScreen">
+      <div class="brand">
+        <div>
+          <h1>Markdown Reader</h1>
+          <p>Màn hình đầu tiên dùng để duyệt cây thư mục và chọn file Markdown trước khi chuyển sang trang đọc.</p>
+        </div>
+        <button class="theme-toggle" data-theme-toggle type="button" aria-label="Đổi giao diện">☀</button>
+      </div>
+
+      <section class="controls explorer-controls">
+        <div class="explorer-toolbar">
+          <nav class="breadcrumb" id="breadcrumb" aria-label="Đường dẫn thư mục"></nav>
+          <button class="ghost-button reload-button" id="reloadRepoButton" type="button" title="Tải lại">↺</button>
+        </div>
+        <input class="search" id="searchInput" type="search" placeholder="Tìm trong thư mục này..." autocomplete="off">
+        <p class="source-note" id="sourceNote">Tự động quét thư mục data/ từ GitHub mỗi lần tải trang.</p>
+        <p class="status" id="statusText">Đang chuẩn bị danh sách tài liệu...</p>
+      </section>
+
+      <div class="tree explorer-tree" id="treeContainer" aria-live="polite"></div>
+
+      <p class="hint">Tự động nhận theme đã lưu. Danh sách file được quét tự động từ GitHub, không cần cập nhật tay.</p>
+    </section>
+
+    <main class="screen viewer panel hidden" id="readerScreen">
+      <header class="viewer-header">
+        <div>
+          <div class="reader-toolbar">
+            <button class="ghost-button back-button" id="backButton" type="button">Quay lại</button>
+            <button class="theme-toggle compact-theme-toggle" data-theme-toggle type="button" aria-label="Đổi giao diện">☀</button>
+          </div>
+          <h2 class="viewer-title" id="viewerTitle">Chọn một file Markdown</h2>
+          <p class="viewer-subtitle" id="viewerSubtitle">Sau khi chọn file ở màn hình duyệt, nội dung sẽ hiển thị ở đây.</p>
+        </div>
+        <div class="viewer-actions">
+          <span class="meta-chip" id="sourceChip">Chưa có nguồn</span>
+          <button class="ghost-button hidden" id="openRawButton" type="button">Mở file gốc</button>
+        </div>
+      </header>
+
+      <section id="viewerBody">
+        <div class="placeholder" id="placeholder">
+          <strong>Chưa có nội dung để hiển thị</strong>
+          <span>Quay lại màn hình duyệt để chọn file Markdown cần đọc.</span>
+        </div>
+        <article class="markdown hidden" id="markdownContent"></article>
+      </section>
+    </main>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js"></script>
+  <script>
+
+    const INLINE_KATEX_RULE = /^(\${1,2})(?!\$)((?:\\[\s\S]|[^\\])*?(?:\\[\s\S]|[^\\$]))\1(?=[\s?!\.,:;\)\]\}"'’“”！？。，：；]|$)/;
+    const BLOCK_KATEX_RULE = /^(\$\$)\n([\s\S]+?)\n\1(?:\n|$)/;
+    const KATEX_MACROS = {
+      "\\R": "\\mathbb{R}",
+      "\\Z": "\\mathbb{Z}",
+      "\\Q": "\\mathbb{Q}",
+      "\\N": "\\mathbb{N}",
+      "\\C": "\\mathbb{C}",
+      "\\exist": "\\exists"
+    };
+    const KATEX_RENDER_OPTIONS = Object.freeze({
+      throwOnError: false,
+      strict: "ignore",
+      macros: KATEX_MACROS
+    });
+
+    const DATA_ROOT = "data";
+
+    const state = {
+      files: [],
+      currentFile: null,
+      filter: "",
+      fileTree: null,
+      currentPath: DATA_ROOT
+    };
+
+    const elements = {
+      themeToggles: Array.from(document.querySelectorAll("[data-theme-toggle]")),
+      reloadRepoButton: document.getElementById("reloadRepoButton"),
+      searchInput: document.getElementById("searchInput"),
+      sourceNote: document.getElementById("sourceNote"),
+      statusText: document.getElementById("statusText"),
+      breadcrumb: document.getElementById("breadcrumb"),
+      treeContainer: document.getElementById("treeContainer"),
+      explorerScreen: document.getElementById("explorerScreen"),
+      readerScreen: document.getElementById("readerScreen"),
+      backButton: document.getElementById("backButton"),
+      viewerTitle: document.getElementById("viewerTitle"),
+      viewerSubtitle: document.getElementById("viewerSubtitle"),
+      sourceChip: document.getElementById("sourceChip"),
+      openRawButton: document.getElementById("openRawButton"),
+      placeholder: document.getElementById("placeholder"),
+      markdownContent: document.getElementById("markdownContent")
+    };
+
+    marked.setOptions({
+      gfm: true,
+      breaks: false,
+      headerIds: true,
+      mangle: false
+    });
+
+    marked.use({
+      extensions: [
+        createInlineKatexExtension(),
+        createBlockKatexExtension()
+      ]
+    });
+
+    function applyTheme(theme) {
+      document.body.dataset.theme = theme;
+      localStorage.setItem("markdown-reader-theme", theme);
+      elements.themeToggles.forEach((toggle) => {
+        toggle.textContent = theme === "dark" ? "☾" : "☀";
+      });
+    }
+
+    function initTheme() {
+      const savedTheme = localStorage.getItem("markdown-reader-theme");
+      const preferredDark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+      applyTheme(savedTheme || (preferredDark ? "dark" : "light"));
+    }
+
+    function setStatus(message, isError = false) {
+      elements.statusText.textContent = message;
+      elements.statusText.classList.toggle("error", isError);
+    }
+
+    function normalizePath(path) {
+      return path.replace(/^\.\//, "").replace(/\\/g, "/");
+    }
+
+    function encodePathSegments(path) {
+      return normalizePath(path)
+        .split("/")
+        .map((segment) => encodeURIComponent(segment))
+        .join("/");
+    }
+
+    function collapseMathContent(content) {
+      return content
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .join(" ");
+    }
+
+    function splitMarkdownSegments(text) {
+      const segments = [];
+      const fencePattern = /(^|\n)(`{3,}|~{3,})[^\n]*\n[\s\S]*?\n\2[ \t]*(?=\n|$)/g;
+      let lastIndex = 0;
+      let match;
+
+      while ((match = fencePattern.exec(text)) !== null) {
+        const fenceStart = match.index + match[1].length;
+        if (lastIndex < fenceStart) {
+          segments.push({ type: "markdown", content: text.slice(lastIndex, fenceStart) });
+        }
+
+        segments.push({ type: "code", content: text.slice(fenceStart, fencePattern.lastIndex) });
+        lastIndex = fencePattern.lastIndex;
+      }
+
+      if (lastIndex < text.length) {
+        segments.push({ type: "markdown", content: text.slice(lastIndex) });
+      }
+
+      return segments;
+    }
+
+    function normalizeListItemMathBlocks(text) {
+      return text.replace(
+        /(^|\n)([ \t]*(?:[*+-]|\d+\.)[ \t]+)\$[ \t]*\n([\s\S]+?)\n[ \t]*\$[ \t]*(?=\n|$)/g,
+        (_, lineStart, prefix, content) => `${lineStart}${prefix}$$${collapseMathContent(content)}$$`
+      );
+    }
+
+    function normalizeIndentedMathBlocks(text) {
+      return text.replace(
+        /(^|\n)([ \t]{4,})\$[ \t]*\n([\s\S]+?)\n\2\$[ \t]*(?=\n|$)/g,
+        (_, lineStart, indent, content) => `${lineStart}${indent}$$${collapseMathContent(content)}$$`
+      );
+    }
+
+    function normalizeStandaloneMathBlocks(text) {
+      return text.replace(
+        /(^|\n)([ \t]{0,3}(?:>[ \t]*)*)\$[ \t]*\n([\s\S]+?)\n\2\$[ \t]*(?=\n|$)/g,
+        (_, lineStart, prefix, content) => {
+          const body = content.trimEnd();
+          return `${lineStart}${prefix}$$\n${body}\n${prefix}$$`;
+        }
+      );
+    }
+
+    function ensureTopLevelDisplayMathSpacing(text) {
+      return text.replace(/([^\n])\n(?=\$\$\n)/g, "$1\n\n");
+    }
+
+    function preprocessMath(text) {
+      const normalizedText = text.replace(/\r\n/g, "\n");
+
+      return splitMarkdownSegments(normalizedText)
+        .map((segment) => {
+          if (segment.type === "code") {
+            return segment.content;
+          }
+
+          let next = normalizeListItemMathBlocks(segment.content);
+          next = normalizeIndentedMathBlocks(next);
+          next = normalizeStandaloneMathBlocks(next);
+          return ensureTopLevelDisplayMathSpacing(next);
+        })
+        .join("");
+    }
+
+    async function fetchFileIndex() {
+      const hostname = window.location.hostname;
+      const owner = hostname.endsWith(".github.io")
+        ? hostname.replace(/\.github\.io$/i, "")
+        : "Hiulaptop";
+      const repo = hostname.endsWith(".github.io")
+        ? (window.location.pathname.split("/").filter(Boolean)[0] || `${owner}.github.io`)
+        : "YoutubeCourses";
+
+      const response = await fetch(
+        `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/master?recursive=1`,
+        { headers: { Accept: "application/vnd.github+json" } }
+      );
+
+      if (!response.ok) {
+        throw new Error(`Không quét được thư mục ${DATA_ROOT}/ từ GitHub (${response.status}).`);
+      }
+
+      const { tree } = await response.json();
+
+      return tree
+        .filter((item) => item.type === "blob" && item.path.startsWith(DATA_ROOT + "/") && item.path.toLowerCase().endsWith(".md"))
+        .map((item) => {
+          const path = normalizePath(item.path);
+          return {
+            id: path,
+            path,
+            fullPath: path,
+            name: path.split("/").pop(),
+            url: `https://raw.githubusercontent.com/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/master/${encodePathSegments(path)}`
+          };
+        })
+        .sort((a, b) => a.path.localeCompare(b.path, "vi"));
+    }
+
+    function escapeHtml(value) {
+      return value
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#039;");
+    }
+
+    function startsInlineMath(previousCharacter) {
+      return !previousCharacter || /[\s([{'"“‘]/.test(previousCharacter);
+    }
+
+    function shouldFallbackMath(text, displayMode) {
+      if (/["“”]/.test(text)) {
+        return true;
+      }
+
+      return !displayMode && /[À-ỹĐđ]/.test(text);
+    }
+
+    function formatMathFallback(text, displayMode) {
+      const normalized = text
+        .replaceAll("\\space", " ")
+        .replaceAll("\\mathbb{R}", "ℝ")
+        .replaceAll("\\mathbb{Z}", "ℤ")
+        .replaceAll("\\mathbb{Q}", "ℚ")
+        .replaceAll("\\mathbb{N}", "ℕ")
+        .replaceAll("\\mathbb{C}", "ℂ")
+        .replace(/\\sqrt\{([^}]+)\}/g, "√($1)")
+        .replace(/\^\\circ/g, "°")
+        .replaceAll("\\Rightarrow", "⇒")
+        .replaceAll("\\Leftrightarrow", "⇔")
+        .replaceAll("\\rightarrow", "→")
+        .replaceAll("\\leftrightarrow", "↔")
+        .replaceAll("\\wedge", "∧")
+        .replaceAll("\\vee", "∨")
+        .replaceAll("\\neg", "¬")
+        .replaceAll("\\overline", "overline")
+        .replaceAll("\\le", "≤")
+        .replaceAll("\\ge", "≥")
+        .replaceAll("\\lt", "<")
+        .replaceAll("\\gt", ">")
+        .replaceAll("\\pi", "π")
+        .replaceAll("\\therefore", "∴")
+        .replaceAll("\\vdots", "⋮")
+        .replaceAll("\\forall", "∀")
+        .replaceAll("\\exists", "∃")
+        .replaceAll("\\exist", "∃")
+        .replaceAll("\\R", "ℝ")
+        .replaceAll("\\Z", "ℤ")
+        .replaceAll("\\Q", "ℚ")
+        .replaceAll("\\N", "ℕ")
+        .replaceAll("\\C", "ℂ");
+      const formatted = escapeHtml(normalized);
+
+      if (displayMode) {
+        return `<div class="math-fallback block-math-fallback">${formatted.replaceAll("\\\\", "<br>")}</div>\n`;
+      }
+
+      return `<span class="math-fallback inline-math-fallback">${formatted}</span>`;
+    }
+
+    function renderKatexToken(text, displayMode) {
+      if (shouldFallbackMath(text, displayMode)) {
+        return formatMathFallback(text, displayMode);
+      }
+
+      try {
+        return katex.renderToString(text, {
+          ...KATEX_RENDER_OPTIONS,
+          displayMode
+        }) + (displayMode ? "\n" : "");
+      } catch (error) {
+        return formatMathFallback(text, displayMode);
+      }
+    }
+
+    function createInlineKatexExtension() {
+      return {
+        name: "inlineKatex",
+        level: "inline",
+        start(src) {
+          for (let index = 0; index < src.length; index += 1) {
+            if (src.charAt(index) !== "$") {
+              continue;
+            }
+
+            if (!startsInlineMath(index === 0 ? "" : src.charAt(index - 1))) {
+              continue;
+            }
+
+            if (src.slice(index).match(INLINE_KATEX_RULE)) {
+              return index;
+            }
+          }
+
+          return undefined;
+        },
+        tokenizer(src) {
+          const match = src.match(INLINE_KATEX_RULE);
+          if (!match) {
+            return undefined;
+          }
+
+          return {
+            type: "inlineKatex",
+            raw: match[0],
+            text: match[2].trim(),
+            displayMode: match[1].length === 2
+          };
+        },
+        renderer(token) {
+          return renderKatexToken(token.text, token.displayMode);
+        }
+      };
+    }
+
+    function createBlockKatexExtension() {
+      return {
+        name: "blockKatex",
+        level: "block",
+        tokenizer(src) {
+          const match = src.match(BLOCK_KATEX_RULE);
+          if (!match) {
+            return undefined;
+          }
+
+          return {
+            type: "blockKatex",
+            raw: match[0],
+            text: match[2].trim(),
+            displayMode: match[1].length === 2
+          };
+        },
+        renderer(token) {
+          return renderKatexToken(token.text, token.displayMode);
+        }
+      };
+    }
+
+    function getHashPath() {
+      return decodeURIComponent(window.location.hash.replace(/^#/, "").trim());
+    }
+
+    function setHashPath(path) {
+      const nextHash = encodeURIComponent(path);
+      if (window.location.hash.replace(/^#/, "") !== nextHash) {
+        history.replaceState(null, "", `${window.location.pathname}${window.location.search}#${nextHash}`);
+      }
+    }
+
+    function clearHashPath() {
+      if (!window.location.hash) {
+        return;
+      }
+      history.replaceState(null, "", `${window.location.pathname}${window.location.search}`);
+    }
+
+    function setScreen(screenName) {
+      elements.explorerScreen.classList.toggle("hidden", screenName !== "explorer");
+      elements.readerScreen.classList.toggle("hidden", screenName !== "reader");
+    }
+
+    async function fetchMarkdownFile(file) {
+      let response;
+      try {
+        response = await fetch(file.url || encodePathSegments(file.path));
+      } catch {
+        throw new Error(`Không tải được ${file.path}.`);
+      }
+
+      if (!response.ok) {
+        throw new Error(`Không tải được ${file.path} (${response.status}).`);
+      }
+
+      return response.text();
+    }
+
+    function buildFileTree(files) {
+      const root = {
+        type: "folder",
+        name: "",
+        path: "",
+        children: {
+          [DATA_ROOT]: {
+            type: "folder",
+            name: DATA_ROOT,
+            path: DATA_ROOT,
+            children: {}
+          }
+        }
+      };
+
+      files.forEach((file) => {
+        const parts = file.path.split("/");
+        let node = root;
+
+        for (let i = 0; i < parts.length - 1; i++) {
+          const part = parts[i];
+          if (!node.children[part]) {
+            node.children[part] = {
+              type: "folder",
+              name: part,
+              path: parts.slice(0, i + 1).join("/"),
+              children: {}
+            };
+          }
+          node = node.children[part];
+        }
+
+        const filename = parts[parts.length - 1];
+        node.children[filename] = {
+          type: "file",
+          name: filename,
+          path: file.path,
+          id: file.id
+        };
+      });
+
+      return root;
+    }
+
+    function getNodeAtPath(tree, path) {
+      if (!path) return tree;
+
+      const parts = path.split("/").filter(Boolean);
+      let node = tree;
+
+      for (const part of parts) {
+        if (!node.children || !node.children[part]) return null;
+        node = node.children[part];
+      }
+
+      return node;
+    }
+
+    function renderBreadcrumb() {
+      const relativePath = state.currentPath === DATA_ROOT
+        ? ""
+        : state.currentPath.startsWith(DATA_ROOT + "/")
+          ? state.currentPath.slice(DATA_ROOT.length + 1)
+          : "";
+
+      if (!relativePath) {
+        elements.breadcrumb.innerHTML = `<span class="breadcrumb-current">${escapeHtml(DATA_ROOT)}</span>`;
+        return;
+      }
+
+      const parts = relativePath.split("/");
+      const crumbs = [
+        `<button class="breadcrumb-link" type="button" data-nav-path="${escapeHtml(DATA_ROOT)}">${escapeHtml(DATA_ROOT)}</button>`
+      ];
+
+      parts.forEach((part, index) => {
+        const path = DATA_ROOT + "/" + parts.slice(0, index + 1).join("/");
+        const isLast = index === parts.length - 1;
+        crumbs.push('<span class="breadcrumb-sep">›</span>');
+        if (isLast) {
+          crumbs.push(`<span class="breadcrumb-current">${escapeHtml(part)}</span>`);
+        } else {
+          crumbs.push(`<button class="breadcrumb-link" type="button" data-nav-path="${escapeHtml(path)}">${escapeHtml(part)}</button>`);
+        }
+      });
+
+      elements.breadcrumb.innerHTML = crumbs.join("");
+      elements.breadcrumb.querySelectorAll("[data-nav-path]").forEach((btn) => {
+        btn.addEventListener("click", () => navigateTo(btn.dataset.navPath));
+      });
+    }
+
+    function navigateTo(path) {
+      state.currentPath = path;
+      state.filter = "";
+      elements.searchInput.value = "";
+      renderExplorer();
+      renderBreadcrumb();
+    }
+
+    function renderExplorer() {
+      if (!state.fileTree) {
+        elements.treeContainer.innerHTML = '<p class="status">Đang tải...</p>';
+        return;
+      }
+
+      const node = getNodeAtPath(state.fileTree, state.currentPath);
+
+      if (!node || node.type !== "folder") {
+        elements.treeContainer.innerHTML = '<p class="status">Không tìm thấy thư mục.</p>';
+        return;
+      }
+
+      const keyword = state.filter.trim().toLowerCase();
+      const children = Object.values(node.children);
+      const filtered = keyword
+        ? children.filter((item) => item.name.toLowerCase().includes(keyword))
+        : children;
+
+      const folders = filtered
+        .filter((item) => item.type === "folder")
+        .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+
+      const files = filtered
+        .filter((item) => item.type === "file")
+        .sort((a, b) => a.name.localeCompare(b.name, "vi"));
+
+      if (filtered.length === 0) {
+        const message = keyword
+          ? "Không tìm thấy nội dung phù hợp."
+          : state.files.length === 0
+            ? `Không có file Markdown nào trong ${DATA_ROOT}/.`
+            : "Thư mục này chưa có file Markdown.";
+        elements.treeContainer.innerHTML = `<p class="status">${escapeHtml(message)}</p>`;
+        return;
+      }
+
+      const folderHtml = folders.map((folder) =>
+        `<button class="explorer-item explorer-folder-item" type="button" data-nav-path="${escapeHtml(folder.path)}">
+          <span class="item-icon">📁</span>
+          <span class="item-name">${escapeHtml(folder.name)}</span>
+          <span class="item-arrow">›</span>
+        </button>`
+      ).join("");
+
+      const fileHtml = files.map((file) => {
+        const isActive = state.currentFile && state.currentFile.id === file.id;
+        return `<button class="explorer-item explorer-file-item${isActive ? " active" : ""}" type="button" data-file-id="${escapeHtml(file.id)}">
+          <span class="item-icon">📄</span>
+          <span class="item-name">${escapeHtml(file.name)}</span>
+        </button>`;
+      }).join("");
+
+      elements.treeContainer.innerHTML = folderHtml + fileHtml;
+
+      elements.treeContainer.querySelectorAll("[data-nav-path]").forEach((btn) => {
+        btn.addEventListener("click", () => navigateTo(btn.dataset.navPath));
+      });
+      elements.treeContainer.querySelectorAll("[data-file-id]").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const file = state.files.find((f) => f.id === btn.dataset.fileId);
+          if (file) openFile(file);
+        });
+      });
+    }
+
+    function renderMarkdown(markdownText) {
+      const normalizedMarkdown = markdownText.replace(/^[\u200B\u200C\u200D\u200E\u200F\uFEFF]/, "");
+      const preprocessedMarkdown = preprocessMath(normalizedMarkdown);
+      const html = marked.parse(preprocessedMarkdown);
+      const safeHtml = DOMPurify.sanitize(html, {
+        USE_PROFILES: { html: true, svg: true, mathMl: true }
+      });
+
+      elements.placeholder.classList.add("hidden");
+      elements.markdownContent.classList.remove("hidden");
+      elements.markdownContent.innerHTML = safeHtml;
+    }
+
+    async function openFile(file) {
+      try {
+        state.currentFile = file;
+        const fileParts = file.path.split("/");
+        if (fileParts.length > 1) {
+          state.currentPath = fileParts.slice(0, -1).join("/");
+        }
+        renderExplorer();
+        renderBreadcrumb();
+        setStatus(`Đang tải ${file.path}...`);
+
+        const markdown = await fetchMarkdownFile(file);
+        renderMarkdown(markdown);
+
+        elements.viewerTitle.textContent = file.name;
+        elements.viewerSubtitle.textContent = file.path;
+        elements.sourceChip.textContent = `${DATA_ROOT}/`;
+        elements.openRawButton.dataset.url = file.url || encodePathSegments(file.path);
+        elements.openRawButton.classList.remove("hidden");
+        setHashPath(file.path);
+        setScreen("reader");
+        setStatus(`Đang hiển thị ${file.path}.`);
+      } catch (error) {
+        console.error(error);
+        setStatus(error.message || "Có lỗi khi mở file Markdown.", true);
+      }
+    }
+
+    function resetViewer() {
+      state.currentFile = null;
+      elements.viewerTitle.textContent = "Chọn một file Markdown";
+      elements.viewerSubtitle.textContent = "Sau khi chọn file ở màn hình duyệt, nội dung sẽ hiển thị ở đây.";
+      elements.sourceChip.textContent = `${DATA_ROOT}/`;
+      delete elements.openRawButton.dataset.url;
+      elements.openRawButton.classList.add("hidden");
+      elements.markdownContent.innerHTML = "";
+      elements.markdownContent.classList.add("hidden");
+      elements.placeholder.classList.remove("hidden");
+    }
+
+    function returnToExplorer() {
+      clearHashPath();
+      setScreen("explorer");
+      renderExplorer();
+      renderBreadcrumb();
+      setStatus("Đang ở màn hình duyệt tài liệu.");
+    }
+
+    async function restoreHashSelection() {
+      const targetPath = getHashPath();
+      if (!targetPath) {
+        return false;
+      }
+
+      const match = state.files.find((file) => file.path === targetPath || file.fullPath === targetPath);
+      if (match) {
+        await openFile(match);
+        return true;
+      }
+
+      return false;
+    }
+
+    async function applyFileListing(files, sourceNote) {
+      state.filter = "";
+      elements.searchInput.value = "";
+      state.currentPath = DATA_ROOT;
+      resetViewer();
+
+      state.files = files;
+      state.fileTree = buildFileTree(state.files);
+      elements.sourceNote.textContent = sourceNote;
+      elements.sourceChip.textContent = `${DATA_ROOT}/`;
+
+      renderBreadcrumb();
+      renderExplorer();
+
+      if (state.files.length === 0) {
+        setScreen("explorer");
+        setStatus(`Không tìm thấy file Markdown nào trong ${DATA_ROOT}/.`, true);
+        return;
+      }
+
+      const restored = await restoreHashSelection();
+      if (!restored) {
+        setScreen("explorer");
+        setStatus(`Đã quét ${state.files.length} file trong ${DATA_ROOT}/. Hãy chọn một file để đọc.`);
+      }
+    }
+
+    async function initializeDataListing() {
+      try {
+        setStatus(`Đang quét thư mục ${DATA_ROOT}/ từ GitHub...`);
+        const files = await fetchFileIndex();
+        await applyFileListing(files, `Đã quét tự động từ GitHub. Tổng cộng ${files.length} file.`);
+      } catch (error) {
+        console.error(error);
+        setScreen("explorer");
+        setStatus(error.message || `Không quét được thư mục ${DATA_ROOT}/ từ GitHub.`, true);
+      }
+    }
+
+    function bindEvents() {
+      elements.themeToggles.forEach((toggle) => {
+        toggle.addEventListener("click", () => {
+          const nextTheme = document.body.dataset.theme === "dark" ? "light" : "dark";
+          applyTheme(nextTheme);
+        });
+      });
+
+      elements.reloadRepoButton.addEventListener("click", async () => {
+        await initializeDataListing();
+      });
+
+      elements.openRawButton.addEventListener("click", () => {
+        const url = elements.openRawButton.dataset.url;
+        if (url) {
+          window.open(url, "_blank", "noopener");
+        }
+      });
+
+      elements.backButton.addEventListener("click", () => {
+        returnToExplorer();
+      });
+
+      elements.searchInput.addEventListener("input", (event) => {
+        state.filter = event.target.value;
+        renderExplorer();
+      });
+
+      window.addEventListener("hashchange", async () => {
+        const targetPath = getHashPath();
+        if (!targetPath) {
+          setScreen("explorer");
+          return;
+        }
+
+        const match = state.files.find((file) => file.path === targetPath || file.fullPath === targetPath);
+        if (match && (!state.currentFile || state.currentFile.id !== match.id)) {
+          await openFile(match);
+        }
+      });
+    }
+
+    async function initializeApp() {
+      initTheme();
+      state.fileTree = buildFileTree([]);
+      resetViewer();
+      renderBreadcrumb();
+      renderExplorer();
+      bindEvents();
+      await initializeDataListing();
+    }
+
+    initializeApp();
+  </script>
+</body>
+</html>
