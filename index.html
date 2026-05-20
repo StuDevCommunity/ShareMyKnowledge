@@ -592,6 +592,16 @@
         return;
       }
 
+      let parentHtml = "";
+      if (state.currentPath !== DATA_ROOT && !keyword) {
+        const parts = state.currentPath.split("/");
+        const parentPath = parts.slice(0, -1).join("/");
+        parentHtml = `<button class="explorer-item explorer-folder-item explorer-parent-item" type="button" data-nav-path="${escapeHtml(parentPath)}">
+          <span class="item-icon">📁</span>
+          <span class="item-name">..</span>
+        </button>`;
+      }
+
       const folderHtml = folders.map((folder) =>
         `<button class="explorer-item explorer-folder-item" type="button" data-nav-path="${escapeHtml(folder.path)}">
           <span class="item-icon">📁</span>
@@ -608,7 +618,7 @@
         </button>`;
       }).join("");
 
-      elements.treeContainer.innerHTML = folderHtml + fileHtml;
+      elements.treeContainer.innerHTML = parentHtml + folderHtml + fileHtml;
 
       elements.treeContainer.querySelectorAll("[data-nav-path]").forEach((btn) => {
         btn.addEventListener("click", () => navigateTo(btn.dataset.navPath));
@@ -653,6 +663,7 @@
         elements.sourceChip.textContent = `${DATA_ROOT}/`;
         elements.openRawButton.dataset.url = file.url || encodePathSegments(file.path);
         elements.openRawButton.classList.remove("hidden");
+
         setHashPath(file.path);
         setScreen("reader");
         setStatus(`Đang hiển thị ${file.path}.`);
