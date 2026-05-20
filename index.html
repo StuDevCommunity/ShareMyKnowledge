@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ToanRoiRac Markdown Reader</title>
+  <title>ShareMyKnowledge — Kho tài liệu học tập</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;500;600;700&family=Merriweather:wght@400;700&display=swap" rel="stylesheet">
@@ -15,8 +15,8 @@
     <section class="screen explorer-screen panel" id="explorerScreen">
       <div class="brand">
         <div>
-          <h1>Markdown Reader</h1>
-          <p>Màn hình đầu tiên dùng để duyệt cây thư mục và chọn file Markdown trước khi chuyển sang trang đọc.</p>
+          <h1>ShareMyKnowledge</h1>
+          <p>Kho tài liệu học tập của cộng đồng — duyệt thư mục và chọn bài viết để đọc.</p>
         </div>
         <button class="theme-toggle" data-theme-toggle type="button" aria-label="Đổi giao diện">☀</button>
       </div>
@@ -27,13 +27,13 @@
           <button class="ghost-button reload-button" id="reloadRepoButton" type="button" title="Tải lại">↺</button>
         </div>
         <input class="search" id="searchInput" type="search" placeholder="Tìm trong thư mục này..." autocomplete="off">
-        <p class="source-note" id="sourceNote">Tự động quét thư mục data/ từ GitHub mỗi lần tải trang.</p>
+        <p class="source-note" id="sourceNote">Tự động quét kho tài liệu từ GitHub mỗi lần tải trang.</p>
         <p class="status" id="statusText">Đang chuẩn bị danh sách tài liệu...</p>
       </section>
 
       <div class="tree explorer-tree" id="treeContainer" aria-live="polite"></div>
 
-      <p class="hint">Tự động nhận theme đã lưu. Danh sách file được quét tự động từ GitHub, không cần cập nhật tay.</p>
+      <p class="hint">Tự động nhận theme đã lưu. Danh sách tài liệu được quét từ GitHub, không cần cập nhật tay.</p>
     </section>
 
     <main class="screen viewer panel hidden" id="readerScreen">
@@ -43,8 +43,8 @@
             <button class="ghost-button back-button" id="backButton" type="button">Quay lại</button>
             <button class="theme-toggle compact-theme-toggle" data-theme-toggle type="button" aria-label="Đổi giao diện">☀</button>
           </div>
-          <h2 class="viewer-title" id="viewerTitle">Chọn một file Markdown</h2>
-          <p class="viewer-subtitle" id="viewerSubtitle">Sau khi chọn file ở màn hình duyệt, nội dung sẽ hiển thị ở đây.</p>
+          <h2 class="viewer-title" id="viewerTitle">Chọn một bài viết</h2>
+          <p class="viewer-subtitle" id="viewerSubtitle">Sau khi chọn bài viết ở màn hình duyệt, nội dung sẽ hiển thị ở đây.</p>
         </div>
         <div class="viewer-actions">
           <span class="meta-chip" id="sourceChip">Chưa có nguồn</span>
@@ -55,7 +55,7 @@
       <section id="viewerBody">
         <div class="placeholder" id="placeholder">
           <strong>Chưa có nội dung để hiển thị</strong>
-          <span>Quay lại màn hình duyệt để chọn file Markdown cần đọc.</span>
+          <span>Quay lại màn hình duyệt để chọn bài viết cần đọc.</span>
         </div>
         <article class="markdown hidden" id="markdownContent"></article>
       </section>
@@ -83,6 +83,8 @@
       macros: KATEX_MACROS
     });
 
+    const GITHUB_OWNER = "StuDevCommunity";
+    const GITHUB_REPO = "ShareMyKnowledge";
     const DATA_ROOT = "data";
 
     const state = {
@@ -233,13 +235,8 @@
     }
 
     async function fetchFileIndex() {
-      const hostname = window.location.hostname;
-      const owner = hostname.endsWith(".github.io")
-        ? hostname.replace(/\.github\.io$/i, "")
-        : "Hiulaptop";
-      const repo = hostname.endsWith(".github.io")
-        ? (window.location.pathname.split("/").filter(Boolean)[0] || `${owner}.github.io`)
-        : "YoutubeCourses";
+      const owner = GITHUB_OWNER;
+      const repo = GITHUB_REPO;
 
       const response = await fetch(
         `https://api.github.com/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/git/trees/master?recursive=1`,
@@ -247,7 +244,7 @@
       );
 
       if (!response.ok) {
-        throw new Error(`Không quét được thư mục ${DATA_ROOT}/ từ GitHub (${response.status}).`);
+        throw new Error(`Không quét được kho tài liệu từ GitHub (${response.status}).`);
       }
 
       const { tree } = await response.json();
@@ -577,8 +574,8 @@
         const message = keyword
           ? "Không tìm thấy nội dung phù hợp."
           : state.files.length === 0
-            ? `Không có file Markdown nào trong ${DATA_ROOT}/.`
-            : "Thư mục này chưa có file Markdown.";
+            ? `Không có tài liệu nào trong kho.`
+            : "Thư mục này chưa có tài liệu.";
         elements.treeContainer.innerHTML = `<p class="status">${escapeHtml(message)}</p>`;
         return;
       }
@@ -649,14 +646,14 @@
         setStatus(`Đang hiển thị ${file.path}.`);
       } catch (error) {
         console.error(error);
-        setStatus(error.message || "Có lỗi khi mở file Markdown.", true);
+        setStatus(error.message || "Có lỗi khi mở tài liệu.", true);
       }
     }
 
     function resetViewer() {
       state.currentFile = null;
-      elements.viewerTitle.textContent = "Chọn một file Markdown";
-      elements.viewerSubtitle.textContent = "Sau khi chọn file ở màn hình duyệt, nội dung sẽ hiển thị ở đây.";
+      elements.viewerTitle.textContent = "Chọn một bài viết";
+      elements.viewerSubtitle.textContent = "Sau khi chọn bài viết ở màn hình duyệt, nội dung sẽ hiển thị ở đây.";
       elements.sourceChip.textContent = `${DATA_ROOT}/`;
       delete elements.openRawButton.dataset.url;
       elements.openRawButton.classList.add("hidden");
@@ -704,26 +701,26 @@
 
       if (state.files.length === 0) {
         setScreen("explorer");
-        setStatus(`Không tìm thấy file Markdown nào trong ${DATA_ROOT}/.`, true);
+        setStatus(`Không tìm thấy tài liệu nào trong kho.`, true);
         return;
       }
 
       const restored = await restoreHashSelection();
       if (!restored) {
         setScreen("explorer");
-        setStatus(`Đã quét ${state.files.length} file trong ${DATA_ROOT}/. Hãy chọn một file để đọc.`);
+        setStatus(`Đã quét ${state.files.length} tài liệu. Hãy chọn một bài viết để đọc.`);
       }
     }
 
     async function initializeDataListing() {
       try {
-        setStatus(`Đang quét thư mục ${DATA_ROOT}/ từ GitHub...`);
+        setStatus(`Đang quét kho tài liệu từ GitHub...`);
         const files = await fetchFileIndex();
-        await applyFileListing(files, `Đã quét tự động từ GitHub. Tổng cộng ${files.length} file.`);
+        await applyFileListing(files, `Đã quét tự động từ GitHub. Tổng cộng ${files.length} tài liệu.`);
       } catch (error) {
         console.error(error);
         setScreen("explorer");
-        setStatus(error.message || `Không quét được thư mục ${DATA_ROOT}/ từ GitHub.`, true);
+        setStatus(error.message || `Không quét được kho tài liệu từ GitHub.`, true);
       }
     }
 
