@@ -440,7 +440,19 @@
         throw new Error(`Không tải được ${file.path} (${response.status}).`);
       }
 
-      return response.text();
+      const buffer = await response.arrayBuffer();
+      const bytes = new Uint8Array(buffer);
+
+      let encoding = "utf-8";
+      if (bytes.length >= 2) {
+        if (bytes[0] === 0xff && bytes[1] === 0xfe) {
+          encoding = "utf-16le";
+        } else if (bytes[0] === 0xfe && bytes[1] === 0xff) {
+          encoding = "utf-16be";
+        }
+      }
+
+      return new TextDecoder(encoding).decode(buffer);
     }
 
     function buildFileTree(files) {

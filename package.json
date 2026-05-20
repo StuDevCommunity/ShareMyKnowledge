@@ -1,0 +1,25 @@
+{
+  "name": "share-my-knowledge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Kho tài liệu học tập của cộng đồng StuDevCommunity, được viết dưới dạng Markdown.",
+  "scripts": {
+    "check": "node scripts/check-render.mjs",
+    "check:fix": "node scripts/check-render.mjs --fix",
+    "prepare": "husky"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/StuDevCommunity/ShareMyKnowledge.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/StuDevCommunity/ShareMyKnowledge/issues"
+  },
+  "homepage": "https://github.com/StuDevCommunity/ShareMyKnowledge#readme",
+  "devDependencies": {
+    "husky": "^9.1.7"
+  }
+}
